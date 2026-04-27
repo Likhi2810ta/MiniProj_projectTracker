@@ -1,0 +1,4 @@
+# Root — catches anything that escapes the sub-folder rules
+.DS_Store
+Thumbs.db
+*.log
