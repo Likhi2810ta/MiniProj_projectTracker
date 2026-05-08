@@ -16,6 +16,7 @@ Hierarchy of routes:
 from __future__ import annotations
 
 import os
+import re
 from io import BytesIO
 from typing import Any, Optional
 
@@ -29,6 +30,7 @@ from supabase import Client, create_client
 
 from jwt_auth import (
     verify_token,
+    require_admin,
     require_coordinator_for_course,
     require_coordinator_for_project,
 )
@@ -58,7 +60,7 @@ TEMPLATE_COLUMNS: list[str] = [
 # ── Pydantic schemas ─────────────────────────────────────────────────────────
 class BatchIn(BaseModel):
     batch_name: str
-    year: int
+    year: Optional[int] = None
 
 
 class SemesterIn(BaseModel):
@@ -67,6 +69,7 @@ class SemesterIn(BaseModel):
 
 class CourseIn(BaseModel):
     course_name: str
+    course_code: Optional[str] = None
 
 
 class ProjectIn(BaseModel):
@@ -88,6 +91,18 @@ class StudentUpdate(BaseModel):
 
 class CoordinatorIn(BaseModel):
     user_id: str   # Supabase auth user UUID
+
+
+class AssignCoordinatorIn(BaseModel):
+    user_id: str
+    course_id: str
+
+
+_STUDENT_EMAIL_RE = re.compile(r"^[a-zA-Z0-9]+@dsce\.edu\.in$", re.IGNORECASE)
+
+
+def _is_student_email(email: str) -> bool:
+    return bool(_STUDENT_EMAIL_RE.match(email or ""))
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -122,10 +137,28 @@ def list_semesters(batch_id: str, _user=Depends(verify_token)):
     )
 
 
+@router.get("/me")
+def get_me(user: dict = Depends(verify_token)):
+    uid = user.get("sub")
+    email = user.get("email", "")
+    prof = db.table("profiles").select("*").eq("id", uid).execute()
+    if not prof.data:
+        # Legacy user existed before profiles table — auto-approve
+        role = "student" if _is_student_email(email) else "lecturer"
+        new = {"id": uid, "email": email, "role": role, "approved": True}
+        db.table("profiles").insert(new).execute()
+        return new
+    p = prof.data[0]
+    if p.get("role") != "admin" and not p.get("approved", False):
+        raise HTTPException(403, "Account pending admin approval.")
+    return p
+
+
 @router.get("/semesters/{semester_id}/courses")
 def list_courses(semester_id: str, _user=Depends(verify_token)):
     return (
-        db.table("course").select("*")
+        db.table("course")
+        .select("course_id, course_name, course_code, semester_id")
         .eq("semester_id", semester_id).order("course_name").execute().data
     )
 
@@ -134,7 +167,7 @@ def list_courses(semester_id: str, _user=Depends(verify_token)):
 def list_projects(course_id: str, _user=Depends(verify_token)):
     return (
         db.table("project")
-        .select("project_id, title, github, guide, student(student_id, usn, name)")
+        .select("project_id, title, github, guide, students:student(student_id, usn, name)")
         .eq("course_id", course_id).order("title").execute().data
     )
 
@@ -145,7 +178,7 @@ def get_project(project_id: str, _user=Depends(verify_token)):
         db.table("project")
         .select(
             "project_id, title, github, guide, course_id, "
-            "student(student_id, usn, name), "
+            "students:student(student_id, usn, name), "
             "course(course_id, course_name, semester_id, "
             "semester(semester_id, sem_number, batch_id, "
             "batch(batch_id, batch_name, year)))"
@@ -164,21 +197,20 @@ def get_project(project_id: str, _user=Depends(verify_token)):
 
 @router.post("/batches")
 def create_batch(body: BatchIn, _user=Depends(verify_token)):
-    return db.table("batch").insert(body.dict()).execute().data[0]
+    return db.table("batch").insert(body.model_dump()).execute().data[0]
 
 
 @router.post("/batches/{batch_id}/semesters")
 def create_semester(batch_id: str, body: SemesterIn, _user=Depends(verify_token)):
     return db.table("semester").insert(
-        {"batch_id": batch_id, **body.dict()}
+        {"batch_id": batch_id, **body.model_dump()}
     ).execute().data[0]
 
 
 @router.post("/semesters/{semester_id}/courses")
 def create_course(semester_id: str, body: CourseIn, _user=Depends(verify_token)):
-    return db.table("course").insert(
-        {"semester_id": semester_id, **body.dict()}
-    ).execute().data[0]
+    payload = {"semester_id": semester_id, **{k: v for k, v in body.model_dump().items() if v is not None}}
+    return db.table("course").insert(payload).execute().data[0]
 
 
 @router.post("/courses/{course_id}/coordinators")
@@ -196,17 +228,129 @@ def list_coordinators(course_id: str, _user=Depends(verify_token)):
     return db.table("coordinator").select("*").eq("course_id", course_id).execute().data
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin endpoints — require role='admin' in profiles table
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/admin/pending")
+def admin_pending_users(user: dict = Depends(verify_token)):
+    require_admin(user)
+    return (
+        db.table("profiles").select("*")
+        .eq("approved", False).neq("role", "admin").order("created_at").execute().data
+    )
+
+
+@router.post("/admin/approve/{user_id}")
+def admin_approve_user(user_id: str, user: dict = Depends(verify_token)):
+    require_admin(user)
+    res = db.table("profiles").update({"approved": True}).eq("id", user_id).execute()
+    if not res.data:
+        raise HTTPException(404, "User not found.")
+    return res.data[0]
+
+
+@router.delete("/admin/reject/{user_id}")
+def admin_reject_user(user_id: str, user: dict = Depends(verify_token)):
+    require_admin(user)
+    db.table("profiles").delete().eq("id", user_id).execute()
+    from auth_router import _supa_delete_user
+    _supa_delete_user(user_id)
+    return {"message": "User rejected and removed."}
+
+
+@router.get("/admin/users")
+def admin_list_users(user: dict = Depends(verify_token)):
+    require_admin(user)
+    return (
+        db.table("profiles").select("*")
+        .eq("approved", True).neq("role", "admin").order("email").execute().data
+    )
+
+
+@router.get("/admin/courses")
+def admin_list_all_courses(user: dict = Depends(verify_token)):
+    require_admin(user)
+    return db.table("course").select(
+        "course_id, course_name, course_code, "
+        "semester(sem_number, batch(batch_name))"
+    ).execute().data
+
+
+@router.get("/admin/coordinators")
+def admin_list_all_coordinators(user: dict = Depends(verify_token)):
+    require_admin(user)
+    coords = db.table("coordinator").select("*").execute().data or []
+    all_profiles = db.table("profiles").select("id, email, role").execute().data or []
+    pm = {p["id"]: p for p in all_profiles}
+    all_courses = db.table("course").select(
+        "course_id, course_name, course_code"
+    ).execute().data or []
+    cm = {c["course_id"]: c for c in all_courses}
+    for c in coords:
+        c["email"] = pm.get(c["user_id"], {}).get("email", "")
+        course = cm.get(c["course_id"], {})
+        c["course_name"] = course.get("course_name", "")
+        c["course_code"] = course.get("course_code", "")
+    return coords
+
+
+@router.post("/admin/assign-coordinator")
+def admin_assign_coordinator(body: AssignCoordinatorIn, user: dict = Depends(verify_token)):
+    require_admin(user)
+    return db.table("coordinator").upsert(
+        {"user_id": body.user_id, "course_id": body.course_id}
+    ).execute().data[0]
+
+
+@router.delete("/admin/coordinators/{course_id}/{user_id}")
+def admin_remove_coordinator(course_id: str, user_id: str, user: dict = Depends(verify_token)):
+    require_admin(user)
+    db.table("coordinator").delete().eq("course_id", course_id).eq("user_id", user_id).execute()
+    return {"message": "Coordinator removed."}
+
+
+@router.get("/admin/pending")
+def admin_list_pending(user: dict = Depends(verify_token)):
+    require_admin(user)
+    return (
+        db.table("profiles").select("*")
+        .eq("approved", False).order("created_at").execute().data
+    )
+
+
+@router.post("/admin/approve/{user_id}")
+def admin_approve_user(user_id: str, user: dict = Depends(verify_token)):
+    require_admin(user)
+    res = db.table("profiles").update({"approved": True}).eq("id", user_id).execute()
+    if not res.data:
+        raise HTTPException(404, "Profile not found.")
+    return res.data[0]
+
+
+@router.delete("/admin/reject/{user_id}")
+def admin_reject_user(user_id: str, user: dict = Depends(verify_token)):
+    require_admin(user)
+    db.table("profiles").delete().eq("id", user_id).execute()
+    try:
+        from auth_router import _supa_delete_user
+        _supa_delete_user(user_id)
+    except Exception:
+        pass
+    return {"message": "User rejected and removed."}
+
+
 @router.post("/courses/{course_id}/projects")
 def create_project(course_id: str, body: ProjectIn, user=Depends(verify_token)):
     require_coordinator_for_course(course_id, user)
-    payload = {"course_id": course_id, **{k: v for k, v in body.dict().items() if v is not None}}
+    payload = {"course_id": course_id, **{k: v for k, v in body.model_dump().items() if v is not None}}
     return db.table("project").insert(payload).execute().data[0]
 
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: str, body: ProjectUpdate, user=Depends(verify_token)):
     require_coordinator_for_project(project_id, user)
-    patch = {k: v for k, v in body.dict().items() if v is not None}
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
     if not patch:
         raise HTTPException(400, "No fields provided.")
     res = db.table("project").update(patch).eq("project_id", project_id).execute()
@@ -232,7 +376,7 @@ def update_student(student_id: str, body: StudentUpdate, user=Depends(verify_tok
         raise HTTPException(404, "Student not found.")
     require_coordinator_for_project(s.data[0]["project_id"], user)
 
-    patch = {k: v for k, v in body.dict().items() if v is not None}
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
     if not patch:
         raise HTTPException(400, "No fields provided.")
     res = db.table("student").update(patch).eq("student_id", student_id).execute()
@@ -329,7 +473,7 @@ async def upload_project_excel(
     return {
         "project": db.table("project").select("*").eq("project_id", project_id).execute().data[0],
         "students_inserted": inserted,
-        "partial_slots_skipped": skipped_slots,
+        "partial_slots_skipped": len(skipped_slots),
         "applied_project_fields": list(proj_patch.keys()),
     }
 

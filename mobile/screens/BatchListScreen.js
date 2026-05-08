@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet,
-  Pressable, RefreshControl, TextInput,
+  Pressable, RefreshControl, TextInput, Alert,
 } from 'react-native';
-import { API_BASE, authHeaders } from '../config/api';
+import { TRACKER as API_BASE, authHeaders } from '../config/api';
 import { colors, spacing, type, radius, brutalShadow } from '../theme';
 import BrutalCard from '../components/BrutalCard';
 import PillButton from '../components/PillButton';
@@ -19,9 +19,13 @@ export default function BatchListScreen({ navigation }) {
   const [saving, setSaving]         = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/batches`, { headers: await authHeaders() });
-    const data = await res.json();
-    setBatches(Array.isArray(data) ? data : []);
+    try {
+      const res = await fetch(`${API_BASE}/batches`, { headers: await authHeaders() });
+      const data = await res.json();
+      setBatches(Array.isArray(data) ? data : []);
+    } catch (e) {
+      Alert.alert('Error', `Could not load batches: ${e.message}`);
+    }
   }, []);
 
   useEffect(() => {
@@ -39,13 +43,17 @@ export default function BatchListScreen({ navigation }) {
     if (!batchName.trim()) return;
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/batches`, {
+      const res = await fetch(`${API_BASE}/batches`, {
         method: 'POST',
         headers: await authHeaders(true),
         body: JSON.stringify({ batch_name: batchName.trim(), year: year ? parseInt(year) : null }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
       setCreateOpen(false); setBatchName(''); setYear('');
       await load();
+    } catch (e) {
+      Alert.alert('Error', e.message);
     } finally { setSaving(false); }
   }
 

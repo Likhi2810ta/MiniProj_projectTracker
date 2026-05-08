@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, FlatList, StyleSheet,
   KeyboardAvoidingView, Platform, Pressable,
 } from 'react-native';
-import { API_BASE, authHeaders } from '../config/api';
+import { TRACKER, CHATBOT_BASE, authHeaders } from '../config/api';
 import { colors, spacing, type, radius, brutalShadow } from '../theme';
 import BrutalCard from '../components/BrutalCard';
 
@@ -29,7 +29,7 @@ export default function ChatbotScreen({ navigation }) {
     setBusy(true);
 
     try {
-      const res = await fetch(`${API_BASE}/chatbot/filter`, {
+      const res = await fetch(`${CHATBOT_BASE}/filter`, {
         method: 'POST',
         headers: await authHeaders(true),
         body: JSON.stringify({ query: q }),

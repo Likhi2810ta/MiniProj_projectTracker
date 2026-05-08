@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, StyleSheet,
   Pressable, RefreshControl, TextInput,
 } from 'react-native';
-import { API_BASE, authHeaders } from '../config/api';
+import { TRACKER as API_BASE, authHeaders } from '../config/api';
 import { colors, spacing, type, radius } from '../theme';
 import BrutalCard from '../components/BrutalCard';
 import PillButton from '../components/PillButton';

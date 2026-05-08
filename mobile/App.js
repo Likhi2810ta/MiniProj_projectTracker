@@ -8,10 +8,13 @@
  *   cd mobile && npm install
  */
 
-import 'react-native-reanimated';   // must be first import
-
-import React from 'react';
-import { StatusBar, Text, View, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StatusBar, Text, View, StyleSheet, ActivityIndicator } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import LoginScreen from './screens/LoginScreen';
+import { useFonts, Syne_600SemiBold, Syne_700Bold } from '@expo-google-fonts/syne';
+import { SpaceMono_400Regular } from '@expo-google-fonts/space-mono';
+import { DMSans_400Regular, DMSans_500Medium, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -68,6 +71,30 @@ function TabIcon({ label, focused }) {
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Syne_600SemiBold, Syne_700Bold,
+    SpaceMono_400Regular,
+    DMSans_400Regular, DMSans_500Medium, DMSans_700Bold,
+  });
+
+  const [token, setToken] = useState(undefined);
+
+  useEffect(() => {
+    AsyncStorage.getItem('auth_token').then(t => setToken(t || null));
+  }, []);
+
+  if (!fontsLoaded || token === undefined) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
+  }
+
+  if (!token) {
+    return <LoginScreen onLogin={() => AsyncStorage.getItem('auth_token').then(t => setToken(t))} />;
+  }
+
   return (
     <NavigationContainer>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />

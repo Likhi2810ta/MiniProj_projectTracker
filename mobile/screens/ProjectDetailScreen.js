@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
   RefreshControl, Pressable, Linking,
 } from 'react-native';
-import { API_BASE, authHeaders } from '../config/api';
+import { TRACKER, CHATBOT_BASE, authHeaders } from '../config/api';
 import { colors, spacing, type, radius } from '../theme';
 import BrutalCard from '../components/BrutalCard';
 import PillButton from '../components/PillButton';
@@ -30,8 +30,8 @@ export default function ProjectDetailScreen({ route }) {
   const load = useCallback(async () => {
     const headers = await authHeaders(true);
     const [pRes, rRes] = await Promise.all([
-      fetch(`${API_BASE}/projects/${projectId}`, { headers }),
-      fetch(`${API_BASE}/projects/${projectId}/readme`, { headers }),
+      fetch(`${TRACKER}/projects/${projectId}`, { headers }),
+      fetch(`${TRACKER}/projects/${projectId}/readme`, { headers }),
     ]);
     const p = await pRes.json();
     const r = await rRes.json();
@@ -55,7 +55,7 @@ export default function ProjectDetailScreen({ route }) {
     if (explanation) return;
     setExplainBusy(true);
     try {
-      const res = await fetch(`${API_BASE}/chatbot/explain/${projectId}`, {
+      const res = await fetch(`${CHATBOT_BASE}/explain/${projectId}`, {
         method: 'POST', headers: await authHeaders(true),
       });
       const data = await res.json();
@@ -68,7 +68,7 @@ export default function ProjectDetailScreen({ route }) {
     if (suggestData) return;
     setSuggestBusy(true);
     try {
-      const res = await fetch(`${API_BASE}/chatbot/suggest/${projectId}`, {
+      const res = await fetch(`${CHATBOT_BASE}/suggest/${projectId}`, {
         method: 'POST', headers: await authHeaders(true),
       });
       const data = await res.json();

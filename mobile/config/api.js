@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
-export const TRACKER  = `${API_BASE}/api/tracker`;
+const _SERVER = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+export const API_BASE    = _SERVER;                      // server root
+export const TRACKER     = `${_SERVER}/api/tracker`;    // all project-tracker endpoints
+export const CHATBOT_BASE = `${_SERVER}/chatbot`;       // chatbot endpoints
 
 /**
  * Returns fetch-ready headers with the stored JWT.

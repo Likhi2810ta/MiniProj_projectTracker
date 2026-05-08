@@ -15,11 +15,8 @@ import {
   Pressable, ActivityIndicator,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import Animated, {
-  useSharedValue, useAnimatedStyle,
-  withDelay, withTiming, Easing,
-} from 'react-native-reanimated';
-import { API_BASE, authHeaders } from '../config/api';
+import { Animated } from 'react-native';
+import { TRACKER as API_BASE, authHeaders } from '../config/api';
 import { colors, spacing, type, radius, brutalShadow } from '../theme';
 import PillButton from '../components/PillButton';
 import BrutalCard from '../components/BrutalCard';
@@ -29,18 +26,17 @@ const STAGGER_MS  = 90;   // delay between each field reveal
 const DURATION_MS = 340;
 
 function AnimatedField({ label, value, index }) {
-  const opacity    = useSharedValue(0);
-  const translateY = useSharedValue(12);
+  const opacity    = React.useRef(new Animated.Value(0)).current;
+  const translateY = React.useRef(new Animated.Value(12)).current;
 
   React.useEffect(() => {
-    opacity.value    = withDelay(index * STAGGER_MS, withTiming(1, { duration: DURATION_MS, easing: Easing.out(Easing.quad) }));
-    translateY.value = withDelay(index * STAGGER_MS, withTiming(0, { duration: DURATION_MS, easing: Easing.out(Easing.quad) }));
+    Animated.parallel([
+      Animated.timing(opacity,    { toValue: 1, duration: DURATION_MS, delay: index * STAGGER_MS, useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: DURATION_MS, delay: index * STAGGER_MS, useNativeDriver: true }),
+    ]).start();
   }, [value]);
 
-  const anim = useAnimatedStyle(() => ({
-    opacity:   opacity.value,
-    transform: [{ translateY: translateY.value }],
-  }));
+  const anim = { opacity, transform: [{ translateY }] };
 
   const empty = !value;
   return (
